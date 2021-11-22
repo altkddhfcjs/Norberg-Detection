@@ -1,8 +1,6 @@
 import math
-import cv2
 import argparse
-#import logging
-import torch.optim as optim
+import os, torch
 import matplotlib.pyplot as plt
 import PIL.Image as Image
 from PIL import ImageDraw
@@ -17,21 +15,37 @@ from detectron2.solver.build import get_default_optimizer_params, maybe_add_grad
 from detectron2 import model_zoo
 from detectron2.modeling import build_model
 
-parser = argparse.ArgumentParser(prog='imgTransform'
+
+#os.system("sudo conda install pytorch==1.8.0 torchvision==0.9.0 torchaudio==0.8.0 cudatoolkit=11.1 -c pytorch -c conda-forge")
+
+parser = argparse.ArgumentParser(prog='Norberg Detection'
     , formatter_class=argparse.RawTextHelpFormatter
     , description=
-        'Image transform\n' 
-        'convert : convert image\' color ( gray )'
+        'Norberg Detection\n' 
+        'output : norgerg info ( img, txt )'
 )
-parser.add_argument('-inpfolder', help="path norberg input directory", metavar="INPUTFOLDER", dest="INPUTROLDER")
-#parser.add_argument('-convert',nargs = 1, choices = ['gray'],default = [],help='change image\'s color, now available gray')
-parser.add_argument('-prePath',help='path of output file',metavar='PREPATH',dest='PREPATH')
+parser.add_argument('--inpfolder', help="path norberg input directory") #, metavar="INPUTFOLDER", dest="INPUTROLDER")
+parser.add_argument('--cpu', default=True, help="path norberg input directory") #, metavar="INPUTFOLDER", dest="INPUTROLDER")
+parser.add_argument('-prePath',help='path of output file', metavar='PREPATH',dest='PREPATH')
 
 args = parser.parse_args()
 
-def get_config(config_file):
+def get_config(config_file, is_cpu):
+    print("CUDA: {} / torch: {} / cuda available: {}".format(torch.version.cuda, torch.__version__, torch.cuda.is_available()))
     cfg = get_cfg()
     cfg.merge_from_file(config_file)
+    
+    if is_cpu:
+        print("Running CPU")
+        cfg.MODEL.DEVICE = "cpu"
+    else:
+        if torch.cuda.is_available():
+            print("Error: CUDA Failed")
+            print("Running CPU")
+            cfg.MODEL.DEVICE = "cpu"
+        else:
+            cfg.MODEL.DEVICE = "cuda"
+            print("Running GPU!")
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.005
     cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = 0.005
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1
@@ -61,6 +75,14 @@ def half_split(img, dis):
     return right_leg, left_leg
 
 def demo(cfg, img_path, pre_path):
+    try:
+        if not(os.path.isdir(pre_path)):
+            os.makedirs(os.path.join(pre_path))
+    except OSError as e:
+        if e.errno != errno.EEXIST:
+            print("Failed to create directory!!!!!")
+            raise
+    
     # left, right mean leg direct
     resultTxtF = open(pre_path + "result.txt", "w")
     predictor = DefaultPredictor(cfg)
@@ -105,23 +127,26 @@ def demo(cfg, img_path, pre_path):
 
         lb_x = left_bottom[0] + w//2
         lb_y = left_bottom[1]
-
+    
+    ## Result True
     if right_leg_normal and left_leg_normal:
         print("Calc norberg angle")
         right_leg_angle = calc_angle([lb_x, lb_y], [rb_x, rb_y], [rt_x, rt_y])
         left_leg_angle = calc_angle([lt_x, lt_y], [lb_x, lb_y], [rb_x, rb_y] )
-
-        right_norberg_normal = right_leg_normal >= 105 #normal
-        if right_norberg_normal:
+        
+        print("Right angle: {}".format(right_leg_angle))
+        right_norberg_normal = "" #normal
+        if float(right_leg_angle) >= 105.0:
             right_norberg_normal = "Normal"
         else:
-            right_norberg_normal = "Abnormal"
-
-        left_norberg_normal = left_leg_angle >= 105 #normal
-        if left_norberg_normal:
+            right_norberg_normal = "Hip dysplasia"
+        
+        print("Left angle: {}".format(left_leg_angle))
+        left_norberg_normal = "" #normal
+        if float(left_leg_angle) >= 105.0:
             left_norberg_normal = "Normal"
         else:
-            left_norberg_normal = "Abnormal"
+            left_norberg_normal = "Hip dysplasia"
 
         result_txt = "Right Leg: {:.2f}/{}, Left Leg: {:.2f}/{}".format(right_leg_angle, right_norberg_normal, left_leg_angle, left_norberg_normal)
 
@@ -157,7 +182,7 @@ def demo(cfg, img_path, pre_path):
         draw.ellipse((int(rt_x - r), int(rt_y - r), int(rt_x + r), int(rt_y + r)), fill=(255, 0, 0))
         draw.ellipse((int(rb_x - r), int(rb_y - r), int(rb_x + r), int(rb_y + r)), fill=(0, 255, 255))
         
-        result_txt = "Right Leg: Nan, Left Leg: Abnormal"
+        result_txt = "Error1: Right Leg: Nan, Left Leg: Nan"
         #font = ImageFont.truetype("arial.ttf", 50)
         #draw.text((10, 60), result_txt, fill=(255, 0, 0), font=font)
         resultTxtF.write(result_txt)
@@ -174,41 +199,43 @@ def demo(cfg, img_path, pre_path):
         draw.ellipse((int(lb_x - r), int(lb_y - r), int(lb_x + r), int(lb_y + r)), fill=(255, 255, 0))
         draw.ellipse((int(lt_x - r), int(lt_y - r), int(lt_x + r), int(lt_y + r)), fill=(0, 255, 0))
 
-        result_txt = "Right Leg: Abnormal, Left Leg: Nan"
+        result_txt = "Error2: Right Leg: Nan, Left Leg: Nan"
         #font = ImageFont.truetype("arial.ttf", 50)
         #draw.text((10, 60), result_txt, fill=(255, 0, 0), font=font)
         resultTxtF.write(result_txt)
         img.save(pre_path + "result_l.png")
     else:
         draw = ImageDraw.Draw(img)
-        result_txt = "Right Leg: Abnormal, Left Leg: Abnormal"
+        result_txt = "Error3: Right Leg: Nan, Left Leg: Nan"
         #font = ImageFont.truetype("arial.ttf", 50)
         #draw.text((10, 60), result_txt, fill=(255, 0, 0), font=font)
         resultTxtF.write(result_txt)
         img.save(pre_path + "result_l.png")
-    resultTxtF.close
+    resultTxtF.close()
 
-#def main(argv):
-def main():
+def main(argv):
     print("start norberg prediction")
 
     # img_path = "myCanvas/input.jpg"
     # config_path = "myCanvas/norberg_config.yaml"
     # model_path = "myCanvas/norberg_model.pth"
     # prePath = None
-
-    img_path = argv.INPUTFOLDER+"/input.jpg"
-    config_path = argv.INPUTFOLDER+"/norberg_config.yaml"
-    model_path = argv.INPUTFOLDER+"/norberg_model.pth"
-    #font_path = argv.INPUTFOLDER+"/arial.ttf"
-    prePath = args.PREPATH # save path
-
-    cfg = get_config(config_path)
+    
+    img_path = argv.inpfolder+"/input.jpg"
+    config_path = argv.inpfolder+"/norberg_config.yaml"
+    model_path = argv.inpfolder+"/norberg_model.pth"
+    prePath = argv.PREPATH # save path
+    print(prePath)
+    is_cpu = argv.cpu
+    if is_cpu == True:
+        print("CPU Running Setting")
+    else:
+        print("GPU Running Setting")
+    cfg = get_config(config_path, is_cpu)
     cfg.MODEL.WEIGHTS = model_path
     
     demo(cfg, img_path, prePath)
     print("DONE")
 
 if __name__ == "__main__":
-    #main(args)
-    main()
+    main(args)
